@@ -22,7 +22,115 @@ class EleicaoViewSet(viewsets.ModelViewSet):
     ordering_fields = ['data_inicio']
     ordering = ['data_inicio']
 
+    @action(detail=True, methods=['post'], url_path='cadastrar-aptos')
+    def cadastrar_aptos(self, request, pk=None):
+        eleicao = self.get_object()
+        if eleicao.status != 'rascunho':
+            return Response({'detail': 'Eleição deve estar em rascunho para cadastrar aptos'}, status=status.HTTP_400_BAD_REQUEST)
+
+        eleitores_ids = request.data.get('eleitores_ids', [])
+        if not isinstance(eleitores_ids, list) or not all(isinstance(i, int) for i in eleitores_ids):
+            return Response({'detail': 'eleitores_ids deve ser uma lista de inteiros'}, status=status.HTTP_400_BAD_REQUEST)
+
+        aptos_criados = 0
+        for eleitor_id in eleitores_ids:
+            try:
+                AptidaoEleitor.objects.create(eleicao=eleicao, eleitor_id=eleitor_id, aptidao=True)
+                aptos_criados += 1
+            except IntegrityError:
+                continue
+
+        return Response({'total_cadastrados': aptos_criados}, status=status.HTTP_201_CREATED)
+
+
+    @action(detail=True, methods=['get'], url_path='votantes')
+    def votantes(self, request, pk=None):
+        eleicao = self.get_object()
+        compareceu = request.query_params.get('compareceu', 'true').lower() == 'true'
+        if compareceu:
+            registros = eleicao.registros_votacao.select_related('eleitor').all()
+            data = [{
+                'nome': r.eleitor.nome,
+                'cpf': r.eleitor.cpf[-4:].rjust(len(r.eleitor.cpf), '*'),
+                'data_hora': r.data_hora
+            } for r in registros]
+        else:
+            aptos = eleicao.aptidoes.filter(aptidao=True).select_related('eleitor')
+            compareceram_ids = eleicao.registros_votacao.values_list('eleitor_id', flat=True)
+            data = [{
+                'nome': a.eleitor.nome,
+                'cpf': a.eleitor.cpf[-4:].rjust(len(a.eleitor.cpf), '*'),
+            } for a in aptos if a.eleitor_id not in compareceram_ids]
+        return Response(data)
+
+    @action(detail=True, methods=['get'], url_path='apuracao')
+    def apuracao(self, request, pk=None):
+        eleicao = self.get_object()
+        if eleicao.status not in ['encerrada', 'apurada']:
+            return Response({'detail': 'Apuração só disponível para eleições encerradas ou apuradas'}, status=status.HTTP_403_FORBIDDEN)
+
+        total_aptos = eleicao.aptidoes.filter(aptidao=True).count()
+        total_votos_validos = eleicao.votos.filter(em_branco=False).count()
+        total_votos_branco = eleicao.votos.filter(em_branco=True).count()
+        total_abstencoes = total_aptos - eleicao.registros_votacao.count()
+
+        candidatos_data = []
+        for candidato in eleicao.candidatos.all():
+            votos_candidato = eleicao.votos.filter(candidato=candidato, em_branco=False).count()
+            percentual = (votos_candidato / total_votos_validos * 100) if total_votos_validos > 0 else 0
+            candidatos_data.append({
+                'id': candidato.id,
+                'nome': candidato.nome,
+                'votos': votos_candidato,
+                'percentual': percentual
+            })
+
+        candidatos_data.sort(key=lambda x: x['votos'], reverse=True)
+        max_votos = candidatos_data[0]['votos'] if candidatos_data else 0
+        vencedores = [c for c in candidatos_data if c['votos'] == max_votos and max_votos > 0]
+
+        if eleicao.status == 'encerrada':
+            eleicao.status = 'apurada'
+            eleicao.save()
+
+        resultado = {
+            'total_aptos': total_aptos,
+            'total_votos_validos': total_votos_validos,
+            'total_votos_branco': total_votos_branco,
+            'total_abstencoes': total_abstencoes,
+            'candidatos': candidatos_data,
+            'vencedores': vencedores
+        }
+        return Response(resultado)
+
    
+    @action(detail=True, methods=['post'], url_path='encerrar')
+    def encerrar(self, request, pk=None):
+        eleicao = self.get_object()
+        if eleicao.status != 'aberta':
+            return Response({'detail': 'Eleição deve estar aberta para ser encerrada'}, status=status.HTTP_400_BAD_REQUEST)
+
+        eleicao.status = 'encerrada'
+        eleicao.save()
+        serializer = self.get_serializer(eleicao)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='abrir')
+    def abrir(self, request, pk=None):
+        eleicao = self.get_object()
+        if eleicao.status != 'rascunho':
+            return Response({'detail': 'Eleição deve estar em rascunho para ser aberta'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if eleicao.candidatos.count() < 2:
+            return Response({'detail': 'Eleição deve ter pelo menos 2 candidatos'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if eleicao.aptidoes.filter(aptidao=True).count() < 1:
+            return Response({'detail': 'Eleição deve ter pelo menos 1 eleitor apto'}, status=status.HTTP_400_BAD_REQUEST)
+
+        eleicao.status = 'aberta'
+        eleicao.save()
+        serializer = self.get_serializer(eleicao)
+        return Response(serializer.data)
 
 
     @action(detail=True, methods=['post'], url_path='votar')
