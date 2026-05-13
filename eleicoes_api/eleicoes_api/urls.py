@@ -31,6 +31,8 @@ router.register(r'aptidoes', AptidaoEleitorViewSet, basename='aptidoes')
 router.register(r'registros-votacao', RegistroVotacaoViewSet, basename='registros-votacao')
 router.register(r'votos', VotoViewSet, basename='votos')
 
+
+
 schema_view = get_schema_view(
    openapi.Info(
       title="Eleicoes API",
@@ -47,4 +49,8 @@ urlpatterns = [
     path('eleicoes_api/', include(router.urls)),
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+    path('eleicoes_api/verificar-comprovante/?token=<str:token>/', verificar_comprovante, name='verificar-comprovante'),
+    path('eleicoes_api/comprovantes/qr/?token=<str:token>/', gerar_qr_code, name='comprovante-qr'),
 ]
+
+# b.o no url ele do verificar componente e no de comprovante nao tem como add no router pois espera viewset
