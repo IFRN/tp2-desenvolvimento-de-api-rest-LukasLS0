@@ -15,8 +15,36 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
+
+from rest_framework.routers import DefaultRouter
+from urna.views import *
+
+from drf_yasg.views import get_schema_view
+from drf_yasg import openapi
+
+router = DefaultRouter()
+router.register(r'eleitores', EleitorViewSet, basename='eleitores')
+router.register(r'eleicoes', EleicaoViewSet, basename='eleicoes')
+router.register(r'candidatos', CandidatoViewSet, basename='candidatos')
+router.register(r'aptidoes', AptidaoEleitorViewSet, basename='aptidoes')
+router.register(r'registros-votacao', RegistroVotacaoViewSet, basename='registros-votacao')
+router.register(r'votos', VotoViewSet, basename='votos')
+
+schema_view = get_schema_view(
+   openapi.Info(
+      title="Eleicoes API",
+      default_version='v1',
+      description="API para gerenciamento de eleições, candidatos e votações",
+      contact=openapi.Contact(email="contato@eleicoesapi.com"),
+   ),
+   public=True, 
+)
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('eleicoes_api/', include(router.urls)),
+    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+    path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
 ]
